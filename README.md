@@ -15,7 +15,7 @@ source install/setup.bash
 # 카메라가 연결된 상태에서
 ros2 run pose_state_publisher pose_state_publish
 ```
-### 토픽 
+### 토픽 확인
 ```
 ros2 topic echo /pose_state   # 상태 코드(Int32)
 ros2 topic echo /x_offset     # x 픽셀 편차(Float32)
