@@ -1,13 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-ROS2 노드: pose_state_publish + multipose 통합본
-- MediaPipe Pose Landmarker (VIDEO mode, multi-person) 사용
-- 상태머신(SEARCHING→HANDUP_DETECT→APPROACHING→ARRIVE) 통합
-- 상태 변경 시 std_msgs/Int32 로 'pose_state' 토픽 발행
-- 시각화(손 든 사람 bbox, 추적 대상 bbox, 간단한 상체 스켈레톤, 상태 라벨) 포함
-"""
-
 import cv2
 import time
 import numpy as np
@@ -28,7 +18,7 @@ CAM_INDEX = 2
 MODEL_PATH = "/home/seorin/mediapipe_ws/pose_landmarker_full.task"
 MAX_PEOPLE = 5
 DRAW_SKELETON = True
-XALIGN_TOL_RATIO = 0.15   # 화면 중앙 정렬 허용 오차 (가로폭 비율)
+XALIGN_TOL_RATIO = 0.1   # 화면 중앙 정렬 허용 오차 (가로폭 비율)
 
 # ----- 임계값 설정 -----
 THRESH_AREA_FAR = 0.10
@@ -49,7 +39,7 @@ STATE_APPROACHING = 2
 STATE_ARRIVE = 3
 
 
-# ===== 유틸: 손 든 사람 판단 =====
+# ===== 손 든 사람 판단 =====
 def hand_up_flag(landmarks_norm):
     try:
         ls_y = landmarks_norm[IDX["LEFT_SHOULDER"]].y
@@ -64,7 +54,7 @@ def hand_up_flag(landmarks_norm):
     return is_up, shoulder_y, lw_y, rw_y
 
 
-# ===== 유틸: 상체 바운딩박스 (픽셀 좌표) =====
+# ===== 상체 바운딩박스 (픽셀 좌표) =====
 def landmarks_bbox_px(landmarks_norm, w, h, padding=0.08):
     UPPER_IDX = [
         IDX["NOSE"],
@@ -92,22 +82,14 @@ def landmarks_bbox_px(landmarks_norm, w, h, padding=0.08):
         return None
     return (x1, y1, x2, y2)
 
-"""
-# ===== 유틸: 화면 중앙 정렬 여부 =====
-def is_center_aligned(bbox, frame_width, tolerance_ratio=0.15):
-    x1, _, x2, _ = bbox
-    cx = (x1 + x2) // 2
-    cx_centered = cx - frame_width // 2
-    return abs(cx_centered) < frame_width * tolerance_ratio
-"""
 
-# ===== 유틸: bbox로부터 x_offset(px) 계산 =====
+# ===== bbox로부터 x_offset(px) 계산 =====
 def x_offset(bbox, frame_width):
     x1, _, x2, _ = bbox
     cx = (x1 + x2) / 2.0
     return float(cx - (frame_width / 2.0)) 
 
-# ===== 유틸: bbox의 면적 비율 계산 =====
+# ===== bbox의 면적 비율 계산 =====
 def bbox_area_ratio(bbox, frame_area):
     if bbox is None:
         return 0.0
@@ -152,22 +134,14 @@ class PoseStatePublisher(Node):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
-
-        # 타임스탬프 (ms)
         self.ts_ms = 0
-
-        # 루프 타이머 (ROS 타이머로 실행)
-        # 30fps 가정 → 0.033s
         self.timer = self.create_timer(0.033, self.loop_once)
-
-        # 최초 상태 송신
-        self.publish_state(self.state)
+        self.publish_state(self.state) # 최초 상태 송신
 
     def publish_state(self, state_value: int):
         msg = Int32()
         msg.data = state_value
         self.publisher_.publish(msg)
-        # 로그도 남김
         state_name = {
             STATE_SEARCHING: "SEARCHING",
             STATE_HANDUP_DETECT: "HANDUP_DETECT",
@@ -197,7 +171,7 @@ class PoseStatePublisher(Node):
         self.ts_ms += 33
         result = self.detector.detect_for_video(mp_image, self.ts_ms)
 
-        # 현재 프레임에서 '손 든 사람' 수집 (다음 단계에서 재사용)
+        # 현재 프레임에서 '손 든 사람' 수집
         handup_people = []
         if result.pose_landmarks:
             for i, lm in enumerate(result.pose_landmarks):
@@ -239,11 +213,10 @@ class PoseStatePublisher(Node):
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
                         cv2.putText(frame, f"tracking ratio: {ratio:.2f}", (x1, max(0, y1 - 10)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-
                         # x 편차 계산 및 발행
                         x_offset_px = x_offset((x1, y1, x2, y2), w)
                         self.xoff_pub.publish(Float32(data=x_offset_px))
-                        
+
                         if abs(x_offset_px) < (w * XALIGN_TOL_RATIO) and ratio >= THRESH_AREA_NEAR:
                              self.change_state(STATE_ARRIVE)
 
@@ -264,10 +237,8 @@ class PoseStatePublisher(Node):
                     bbox = landmarks_bbox_px(lm, w, h, padding=0.08)
                     if bbox:
                         x1, y1, x2, y2 = bbox
-                        # 손 든 사람: 녹색 박스
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 220, 0), 2)
-                        # 라벨(바깥, 좌측 상단)
-                        label = "HAND UP"
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 220, 0), 2) # 손 든 사람: 녹색 박스
+                        label = "HAND UP" # 라벨(바깥, 좌측 상단)
                         cv2.putText(frame, label, (x1, max(0, y1 - 8)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 220, 0), 2)
 
@@ -299,7 +270,6 @@ class PoseStatePublisher(Node):
         cv2.imshow("Pose State (ROS2)", frame)
         key = cv2.waitKey(1) & 0xFF
         if key in (27, ord('q')):
-            # 노드 종료 트리거
             rclpy.shutdown()
 
     def destroy_node(self):
