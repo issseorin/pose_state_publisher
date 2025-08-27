@@ -4,7 +4,7 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from pose_state_publisher.msg import PoseInfo
+from pose_state_publisher_interfaces.msg import PoseInfo
  
 import mediapipe as mp
 from mediapipe.tasks import python

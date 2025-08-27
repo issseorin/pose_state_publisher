@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
         	'pose_state_publish = pose_state_publisher.pose_state_publish:main',
+            'subscriber= pose_state_publisher.subscriber:main', 
         ],
     },
 )
