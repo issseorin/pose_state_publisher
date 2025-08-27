@@ -1,5 +1,6 @@
 
 from setuptools import find_packages, setup
+import os
 
 package_name = 'pose_state_publisher'
 
@@ -11,6 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # msg 파일도 설치되도록 추가
+        (os.path.join('share', package_name, 'msg'), ['msg/PoseInfo.msg']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

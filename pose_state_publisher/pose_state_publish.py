@@ -4,10 +4,8 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Int32
-from std_msgs.msg import Int32
-from std_msgs.msg import Float32 
-
+from pose_state_publisher.msg import PoseInfo
+ 
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -101,8 +99,7 @@ def bbox_area_ratio(bbox, frame_area):
 class PoseStatePublisher(Node):
     def __init__(self):
         super().__init__("pose_state_publisher")
-        self.publisher_ = self.create_publisher(Int32, "pose_state", 10)
-        self.xoff_pub = self.create_publisher(Float32, "x_offset", 10) 
+        self.poseinfo_pub = self.create_publisher(PoseInfo, "pose_info", 10)
 
         # 상태머신 변수
         self.state = STATE_SEARCHING
@@ -138,17 +135,16 @@ class PoseStatePublisher(Node):
         self.timer = self.create_timer(0.033, self.loop_once)
         self.publish_state(self.state) # 최초 상태 송신
 
-    def publish_state(self, state_value: int):
-        msg = Int32()
-        msg.data = state_value
-        self.publisher_.publish(msg)
+    def publish_state(self, state_value: int): # 콘솔 로그만 남김
         state_name = {
             STATE_SEARCHING: "SEARCHING",
-            STATE_HANDUP_DETECT: "HANDUP_DETECT",
-            STATE_APPROACHING: "APPROACHING",
-            STATE_ARRIVE: "ARRIVE",
+             STATE_HANDUP_DETECT: "HANDUP_DETECT",
+             STATE_APPROACHING: "APPROACHING",
+             STATE_ARRIVE: "ARRIVE",
         }.get(state_value, f"UNKNOWN({state_value})")
         self.get_logger().info(f"pose_state = {state_value} ({state_name})")
+
+
 
     def change_state(self, new_state: int):
         if new_state != self.state:
@@ -177,6 +173,11 @@ class PoseStatePublisher(Node):
             for i, lm in enumerate(result.pose_landmarks):
                 if hand_up_flag(lm)[0]:
                     handup_people.append((i, lm))
+
+        # PoseInfo 기본값
+        cur_ratio = 0.0
+        cur_xoff = 0.0
+        
 
         # ===== 상태머신 =====
         if result.pose_landmarks:
@@ -213,9 +214,13 @@ class PoseStatePublisher(Node):
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
                         cv2.putText(frame, f"tracking ratio: {ratio:.2f}", (x1, max(0, y1 - 10)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                        # x 편차 계산 및 발행
+                        # x 편차 계산
                         x_offset_px = x_offset((x1, y1, x2, y2), w)
-                        self.xoff_pub.publish(Float32(data=x_offset_px))
+
+                        # PoseInfo 값 갱신
+                        cur_ratio = float(ratio)
+                        cur_xoff = float(x_offset_px)
+
 
                         if abs(x_offset_px) < (w * XALIGN_TOL_RATIO) and ratio >= THRESH_AREA_NEAR:
                              self.change_state(STATE_ARRIVE)
@@ -266,6 +271,14 @@ class PoseStatePublisher(Node):
         }.get(self.state, "UNKNOWN")
         cv2.putText(frame, f"STATE: {state_text}", (10, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (50, 200, 255), 2)
+
+
+        # 사용자 정의 메시지 PoseInfo 토픽 발행
+        poseinfo = PoseInfo()
+        poseinfo.state = state_text
+        poseinfo.ratio = float(cur_ratio)
+        poseinfo.x_offset = float(cur_xoff)
+        self.poseinfo_pub.publish(poseinfo)
 
         cv2.imshow("Pose State (ROS2)", frame)
         key = cv2.waitKey(1) & 0xFF
